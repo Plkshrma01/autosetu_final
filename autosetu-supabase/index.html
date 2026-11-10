@@ -1,0 +1,80 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>AUTOSETU</title>
+<link rel=stylesheet href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>:root{--n:#0b1f4b;--o:#ff7a00}*{box-sizing:border-box}body{margin:0;font-family:system-ui,sans-serif;background:#f4f6fb;color:var(--n)}
+header{background:var(--n);color:#fff;padding:12px 18px;display:flex;justify-content:space-between;align-items:center}header b{font-size:22px}header b span{color:var(--o)}
+main{max-width:900px;margin:auto;padding:14px}.card{background:#fff;border-radius:14px;padding:14px;margin:10px 0;box-shadow:0 2px 10px #0001}
+input,select{padding:10px;border:1px solid #ccd;border-radius:8px;margin:4px 0;width:100%}button{padding:10px 14px;border:0;border-radius:10px;background:var(--n);color:#fff;font-weight:700;cursor:pointer;margin:3px}
+button.o{background:var(--o)}button.g{background:#1a9c4b}button.r{background:#d33}#map{height:300px;border-radius:14px}
+.big{width:100%;font-size:32px;padding:34px;border-radius:20px;margin:8px 0}.huge{font-size:26px;padding:24px;width:100%}.t{font-size:22px}
+table{width:100%;font-size:13px;border-collapse:collapse}td,th{padding:5px;border-bottom:1px solid #eee;text-align:left}</style></head><body>
+<header><b>🛺 AUTO<span>SETU</span></b><span id=who></span></header><main id=app></main>
+<script>
+// PASTE your Supabase values here (Project Settings > API). The anon key is public by design; security comes from the SQL rules.
+const SUPA_URL='PASTE_PROJECT_URL',SUPA_KEY='PASTE_ANON_PUBLIC_KEY';
+const sb=supabase.createClient(SUPA_URL,SUPA_KEY);
+const $=s=>document.querySelector(s);let U,P,map,mk={},tm;
+const ck=r=>{if(r.error){alert(r.error.message);throw r.error}return r.data};
+const rpc=async(n,a)=>ck(await sb.rpc(n,a));
+const geo=async t=>{const r=await(await fetch('https://nominatim.openstreetmap.org/search?format=json&countrycodes=in&q='+encodeURIComponent(t))).json();if(!r[0]){alert('Place not found: '+t);throw 0}return{lat:+r[0].lat,lng:+r[0].lon,addr:r[0].display_name}};
+const pos=()=>new Promise(r=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>r({lat:p.coords.latitude,lng:p.coords.longitude}),()=>r({lat:31.326,lng:75.576})):r({lat:31.326,lng:75.576}));
+const hav=(a,b,c,d)=>{const p=Math.PI/180,x=Math.sin((c-a)*p/2)**2+Math.cos(a*p)*Math.cos(c*p)*Math.sin((d-b)*p/2)**2;return 12742*Math.asin(Math.sqrt(x))};
+async function logout(){await sb.auth.signOut();location.reload()}
+function authView(){$('#app').innerHTML=`<div class=card><h2>Connecting Every Ride. Empowering Every Journey.</h2><input id=e placeholder=Email><input id=p type=password placeholder=Password>
+<button class=o onclick=login()>Login</button><h3>New here? Register</h3><input id=n placeholder=Name><input id=ph placeholder=Phone><input id=v placeholder="Vehicle number (drivers)">
+<select id=ro><option value=passenger>Passenger</option><option value=driver>Driver</option></select><input id=re placeholder=Email><input id=rp type=password placeholder="Password (min 8)"><button onclick=reg()>Register</button></div>`}
+async function login(){ck(await sb.auth.signInWithPassword({email:$('#e').value,password:$('#p').value}));start()}
+async function reg(){ck(await sb.auth.signUp({email:$('#re').value,password:$('#rp').value,options:{data:{name:$('#n').value,phone:$('#ph').value,role:$('#ro').value,vehicle:$('#v').value}}}));alert('Registered! Now login (check email first if confirmation is on).')}
+async function start(){const{data:{session}}=await sb.auth.getSession();if(!session)return authView();U=session.user;
+P=ck(await sb.from('profiles').select('*').eq('id',U.id).single());if(!P.active){alert('Account suspended');return logout()}
+$('#who').innerHTML=P.name+' ('+P.role+') <button onclick=logout()>Logout</button>';
+const f={passenger:pTick,driver:dTick,admin:aView}[P.role];({passenger:pView,driver:dView,admin:aView})[P.role]();
+sb.channel('rides').on('postgres_changes',{event:'*',schema:'public',table:'rides'},()=>f()).subscribe();tm=setInterval(f,5000)}
+// ---------- PASSENGER ----------
+let K={};
+function pView(){$('#app').innerHTML=`<div class=card><input id=pk placeholder="Pickup address"><button onclick=myloc()>📍 Use my location</button><input id=ds placeholder="Destination">
+<button class=o onclick=book()>Request ride</button><button class=r onclick=sos()>🚨 SOS / Report</button></div><div id=map></div><div id=act class=card></div><div class=card><b>Ride history</b><div id=hi></div></div>`;
+map=L.map('map').setView([31.326,75.576],12);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap'}).addTo(map);myloc();pTick()}
+async function myloc(){const p=await pos();K.pk=p;$('#pk').value='My current location';map.setView([p.lat,p.lng],14);L.marker([p.lat,p.lng]).addTo(map)}
+async function book(){const a=$('#pk').value=='My current location'?{...K.pk,addr:'Current location'}:await geo($('#pk').value),b=await geo($('#ds').value);
+ck(await sb.from('rides').insert({plat:a.lat,plng:a.lng,paddr:a.addr,dlat:b.lat,dlng:b.lng,daddr:b.addr}));pTick()}
+async function sos(){const t=prompt('Describe the emergency/issue');if(t){ck(await sb.from('reports').insert({text:'SOS/REPORT: '+t}));alert('Sent to admin. In danger call 112.')}}
+async function pTick(){if(!$('#act'))return;
+const r=ck(await sb.from('rides').select('*,driver:profiles!rides_driver_id_fkey(name,phone,vehicle,lat,lng)').eq('passenger_id',U.id).or('status.in.(requested,accepted,arrived,started),and(status.eq.completed,rating.is.null)').order('id',{ascending:false}).limit(1))[0];
+if(!r)$('#act').innerHTML='No active ride. Enter destination and request a ride.';
+else if(r.status=='completed')$('#act').innerHTML=`Ride complete! Fare ₹${r.fare}<br>Rate driver: <select id=rt>${[5,4,3,2,1].map(x=>`<option>${x}</option>`)}</select><input id=rv placeholder=Review><button class=o onclick="rpc('rate_ride',{rid:${r.id},r:+$('#rt').value,rv:$('#rv').value}).then(pTick)">Submit</button>`;
+else{const d=r.driver;$('#act').innerHTML=`<b class=t>${{requested:'Finding a driver…',accepted:'Driver is on the way',arrived:'Driver has arrived!',started:'Ride in progress'}[r.status]}</b><br>Fare ₹${r.fare}<br>${d?`Driver: ${d.name} · ${d.vehicle||''} · 📞 ${d.phone||''}<br>`:''}
+${r.status!='started'?`<button class=r onclick="rpc('cancel_ride',{rid:${r.id}}).then(pTick)">Cancel ride</button>`:''}`;
+if(d&&d.lat)mk.d=(mk.d||L.marker([0,0],{icon:L.divIcon({html:'🛺',className:'',iconSize:[30,30]})}).addTo(map)).setLatLng([d.lat,d.lng])}
+if(!r&&mk.d){map.removeLayer(mk.d);mk.d=null}
+const h=ck(await sb.from('rides').select('id,status,fare,rating').eq('passenger_id',U.id).order('id',{ascending:false}).limit(10));$('#hi').innerHTML=h.map(x=>`<p>#${x.id} ${x.status} ₹${x.fare||''} ${x.rating?'★'+x.rating:''}</p>`).join('')}
+// ---------- DRIVER ----------
+function dView(){$('#app').innerHTML=`<button id=gb class=big onclick=tog()></button><div id=st class=card></div><div id=cd></div><div id=td class="card t"></div>`;dTick();}
+async function tog(){const p=await pos();await rpc('set_online',{o:!P.online,la:p.lat,ln:p.lng});dTick()}
+async function dTick(){if(!$('#gb'))return;P=ck(await sb.from('profiles').select('*').eq('id',U.id).single());
+if(P.online){const p=await pos();await sb.rpc('set_online',{o:true,la:p.lat,ln:p.lng})}
+const a=ck(await sb.from('rides').select('*,pax:profiles!rides_passenger_id_fkey(phone)').eq('driver_id',U.id).in('status',['accepted','arrived','started']).limit(1))[0];let q;
+if(!a&&P.online&&P.verified){const rj=ck(await sb.from('rejections').select('ride_id')).map(x=>x.ride_id);
+q=ck(await sb.from('rides').select('*').eq('status','requested')).filter(x=>!rj.includes(x.id)).map(x=>({...x,km:+hav(P.lat,P.lng,x.plat,x.plng).toFixed(1)})).filter(x=>x.km<=15).sort((x,y)=>x.km-y.km)[0]}
+const d0=new Date();d0.setHours(0,0,0,0);const t=ck(await sb.from('rides').select('fare').eq('driver_id',U.id).eq('status','completed').gte('created',d0.toISOString()));
+$('#gb').className='big '+(P.online?'r':'g');$('#gb').textContent=P.online?'🔴 GO OFFLINE':'🟢 GO ONLINE';
+$('#st').innerHTML=`<b class=t>${!P.verified?'⏳ Waiting for admin approval':P.online?'✅ You are ONLINE':'⚪ You are OFFLINE'}</b>`;let h='';
+if(a){const nx={accepted:['arrived','📍 ARRIVED'],arrived:['started','▶️ START RIDE'],started:['completed','🏁 COMPLETE RIDE']}[a.status];
+h=`<div class=card><p class=t>👤 ${a.pname} <a href="tel:${a.pax?.phone}">📞 Call</a></p><p class=t>📍 ${a.paddr}</p><p class=t>🏁 ${a.daddr}</p><p class=t>₹${a.fare}</p>
+<button class="huge ${a.status=='started'?'r':'o'}" onclick="rpc('ride_step',{rid:${a.id},s:'${nx[0]}'}).then(dTick)">${nx[1]}</button>
+${a.status!='started'?`<button class=r onclick="rpc('reject_ride',{rid:${a.id}}).then(dTick)">Cancel this ride</button>`:''}</div>`}
+else if(q)h=`<div class=card style="border:4px solid var(--o)"><p class=t>🔔 NEW RIDE · ${q.km} km away</p><p class=t>👤 ${q.pname}</p><p class=t>📍 ${q.paddr}</p><p class=t>🏁 ${q.daddr}</p><p class=t>₹${q.fare}</p>
+<button class="huge g" onclick="rpc('accept_ride',{rid:${q.id}}).then(dTick).catch(dTick)">✅ ACCEPT</button><button class="huge r" onclick="rpc('reject_ride',{rid:${q.id}}).then(dTick)">❌ REJECT</button></div>`;
+$('#cd').innerHTML=h;$('#td').innerHTML=`Today: ${t.length} rides · ₹${t.reduce((s,x)=>s+x.fare,0)}`}
+// ---------- ADMIN ----------
+async function aView(){const u=ck(await sb.from('profiles').select('*').order('created',{ascending:false})),r=ck(await sb.from('rides').select('passenger_id,pname,status,fare')),rp=ck(await sb.from('reports').select('*').order('id',{ascending:false}).limit(30));
+const st={passengers:u.filter(x=>x.role=='passenger').length,drivers:u.filter(x=>x.role=='driver').length,online:u.filter(x=>x.online).length,rides:r.length,active:r.filter(x=>['requested','accepted','arrived','started'].includes(x.status)).length,revenue:r.filter(x=>x.status=='completed').reduce((s,x)=>s+x.fare,0)};
+const c={};r.filter(x=>x.status=='cancelled').forEach(x=>c[x.pname]=(c[x.pname]||0)+1);const risky=Object.entries(c).filter(e=>e[1]>=3);
+$('#app').innerHTML=`<div class=card>${Object.entries(st).map(([k,v])=>`<span style="display:inline-block;margin:8px 16px"><b class=t>${v}</b><br>${k}</span>`).join('')}</div>
+<div class=card><b>⚠ Suspicious (3+ cancellations)</b>${risky.map(e=>`<p>${e[0]}: ${e[1]}</p>`).join('')||'<p>None</p>'}</div>
+<div class=card><b>Users</b><table>${u.map(x=>`<tr><td>${x.name}<br><small>${x.phone||''} ${x.vehicle||''}</small><td>${x.role}<td>${x.active?'active':'SUSPENDED'}${x.role=='driver'?(x.verified?' ✔':' ⏳'):''}
+<td>${x.role=='driver'&&!x.verified?`<button class=g onclick="adm('${x.id}','verify')">Approve</button>`:''}${x.role!='admin'?(x.active?`<button class=r onclick="adm('${x.id}','suspend')">Suspend</button>`:`<button onclick="adm('${x.id}','restore')">Restore</button>`):''}</tr>`).join('')}</table></div>
+<div class=card><b>Complaints & SOS</b>${rp.map(x=>`<p>${x.text}</p>`).join('')||'<p>None</p>'}</div>`}
+async function adm(i,a){await rpc('admin_action',{uid:i,act:a});aView()}
+start()
+</script></body></html>
